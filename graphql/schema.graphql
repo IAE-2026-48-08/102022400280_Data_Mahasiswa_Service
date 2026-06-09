@@ -1,0 +1,16 @@
+type Student {
+    id: ID!
+    nama: String!
+    nim: String!
+    status: String!
+    quota_sks: Int!
+    used_sks: Int!
+}
+
+type Query {
+    students: [Student!]!
+        @all(model: "App\\Models\\Student")
+
+    student(id: ID! @eq): Student
+        @find(model: "App\\Models\\Student")
+}
