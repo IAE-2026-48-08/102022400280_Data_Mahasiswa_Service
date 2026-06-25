@@ -17,7 +17,7 @@ class StudentController extends Controller
 {
     #[OA\Get(
         path: "/api/v1/students",
-        summary: "Get all students",
+        summary: "Get all active students",
         tags: ["Students"],
         security: [["ApiKeyAuth" => []]],
         responses: [
@@ -43,14 +43,21 @@ class StudentController extends Controller
         parameters: [
             new OA\Parameter(
                 name: "id",
+                description: "Student ID",
                 in: "path",
                 required: true,
                 schema: new OA\Schema(type: "integer")
             )
         ],
         responses: [
-            new OA\Response(response: 200, description: "Success"),
-            new OA\Response(response: 404, description: "Student not found")
+            new OA\Response(
+                response: 200,
+                description: "Success"
+            ),
+            new OA\Response(
+                response: 404,
+                description: "Student not found"
+            )
         ]
     )]
     public function show($id)
@@ -68,6 +75,67 @@ class StudentController extends Controller
             'success' => true,
             'data' => $student
         ]);
+    }
+
+    #[OA\Post(
+        path: "/api/v1/students",
+        summary: "Create student",
+        tags: ["Students"],
+        security: [["ApiKeyAuth" => []]],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ["nim", "nama", "status", "quota_sks", "used_sks"],
+                properties: [
+                    new OA\Property(
+                        property: "nim",
+                        type: "string",
+                        example: "102022400280"
+                    ),
+                    new OA\Property(
+                        property: "nama",
+                        type: "string",
+                        example: "Hans"
+                    ),
+                    new OA\Property(
+                        property: "status",
+                        type: "string",
+                        example: "AKTIF"
+                    ),
+                    new OA\Property(
+                        property: "quota_sks",
+                        type: "integer",
+                        example: 24
+                    ),
+                    new OA\Property(
+                        property: "used_sks",
+                        type: "integer",
+                        example: 10
+                    )
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(
+                response: 201,
+                description: "Student created"
+            )
+        ]
+    )]
+    public function store(Request $request)
+    {
+        $student = Student::create([
+            'nim' => $request->nim,
+            'nama' => $request->nama,
+            'status' => $request->status,
+            'quota_sks' => $request->quota_sks,
+            'used_sks' => $request->used_sks
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $student
+        ], 201);
     }
 
     #[OA\Post(
@@ -106,11 +174,6 @@ class StudentController extends Controller
     )]
     public function validateQuota(Request $request)
     {
-        $request->validate([
-            'student_id' => 'required|integer',
-            'requested_sks' => 'required|integer|min:1'
-        ]);
-
         $student = Student::find($request->student_id);
 
         if (!$student) {
@@ -124,6 +187,8 @@ class StudentController extends Controller
 
         $eligible = $request->requested_sks <= $remaining;
 
+        $token = (new SSOService())->getToken();
+
         $auditData = [
             "student_id" => $student->id,
             "nim" => $student->nim,
@@ -132,64 +197,28 @@ class StudentController extends Controller
             "eligible" => $eligible
         ];
 
-        $soapStatus = "SUCCESS";
-        $rabbitStatus = "SUCCESS";
+        $soapResponse = (new SoapAuditService())->sendAudit(
+            $token,
+            $auditData
+        );
 
-        try {
-
-            $token = (new SSOService())->getToken();
-
-            (new SoapAuditService())->sendAudit(
-                $token,
-                $auditData
-            );
-
-            $rabbit = (new RabbitMQService())->publish(
-                $token,
-                [
-                    "message" => $auditData
-                ]
-            );
-
-            if (isset($rabbit['status'])) {
-                $rabbitStatus = $rabbit['status'];
-            }
-
-        } catch (\Exception $e) {
-
-            $soapStatus = "FAILED";
-            $rabbitStatus = "FAILED";
-
-        }
+        $rabbitResponse = (new RabbitMQService())->publish(
+            $token,
+            [
+                "message" => $auditData
+            ]
+        );
 
         return response()->json([
             "success" => true,
-
             "data" => [
                 "student_id" => $student->id,
                 "remaining_quota" => $remaining,
                 "requested_sks" => $request->requested_sks,
                 "eligible" => $eligible
             ],
-
-            "integration" => [
-                "soap" => $soapStatus,
-                "rabbitmq" => $rabbitStatus
-            ]
+            "soap_response" => $soapResponse,
+            "rabbitmq_response" => $rabbitResponse
         ]);
-        try {
-
-    // seluruh kode SSO SOAP Rabbit
-
-} catch (\Throwable $e) {
-
-    return response()->json([
-        'error' => $e->getMessage(),
-        'line' => $e->getLine(),
-        'file' => $e->getFile()
-    ], 500);
-
-}
     }
 }
-

@@ -13,4 +13,9 @@ class Student extends Model
         'quota_sks',
         'used_sks'
     ];
+
+    public function getNameAttribute()
+    {
+        return $this->nama;
+    }
 }
